@@ -48,7 +48,11 @@
   .seg button.on.out{color:var(--out)} .seg button.on.in{color:var(--in)}
   .amount{display:flex;align-items:baseline;gap:6px;border-bottom:2px solid var(--soft);padding-bottom:8px;margin-bottom:14px}
   .amount span{font-size:28px;color:var(--muted)}
-  .amount input{flex:1;border:0;outline:0;background:none;color:var(--ink);font-size:36px;font-weight:600;width:100%}
+  .amount input{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--ink);font-size:36px;font-weight:600;width:100%}
+  .amount.expr input{font-size:24px}
+  .amount .op{flex:none;align-self:center;width:44px;height:44px;border-radius:12px;border:0;background:var(--soft);color:var(--accent);font-size:24px;font-weight:700;padding:0}
+  .calc{margin:-8px 0 14px;font-size:15px;color:var(--muted)}
+  .calc b{color:var(--ink);font-size:18px;font-variant-numeric:tabular-nums}
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
   .chips button{border:1px solid var(--line);background:none;color:var(--ink);padding:8px 14px;border-radius:999px;font-size:15px}
   .chips button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -148,7 +152,8 @@
         <button data-t="out" class="on out">支出</button>
         <button data-t="in">收入</button>
       </div>
-      <div class="amount"><span class="cur">¥</span><input id="amt" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+      <div class="amount"><span class="cur">¥</span><input id="amt" inputmode="decimal" placeholder="0.00" autocomplete="off"><button class="op" data-op="+" aria-label="加">＋</button><button class="op" data-op="-" aria-label="减">－</button></div>
+      <div class="calc" id="calcLine" hidden></div>
       <div class="chips" id="cats"></div>
       <div class="addcat" id="addCat" hidden>
         <input id="newCat" maxlength="8" placeholder="新分类名称，如：宠物">
@@ -433,11 +438,46 @@
     var b=e.target.closest("button"); if(!b) return;
     curSub = curSub===b.dataset.s ? "" : b.dataset.s; renderCats();
   });
+  // 金额可以写成算式，例如 12.5+8+3-2，自动算出合计
+  function cleanAmt(v){
+    v=v.replace(/[＋]/g,"+").replace(/[－—–]/g,"-").replace(/[^\d.+\-]/g,"");
+    v=v.replace(/^[+\-]+/,"").replace(/([+\-])[+\-]+/g,"$1");
+    return v.split(/([+\-])/).map(function(t){
+      if(t==="+"||t==="-") return t;
+      var p=t.split("."); if(p.length>2) t=p[0]+"."+p.slice(1).join("");
+      p=t.split("."); if(p[1]&&p[1].length>2) t=p[0]+"."+p[1].slice(0,2);
+      return t;
+    }).join("");
+  }
+  function evalAmt(v){
+    var parts=cleanAmt(v).split(/([+\-])/), total=0, sign=1, any=false;
+    parts.forEach(function(t){
+      if(t==="+"){ sign=1; return; } if(t==="-"){ sign=-1; return; }
+      var n=parseFloat(t); if(!isNaN(n)){ total+=sign*Math.round(n*100); any=true; }
+    });
+    return any ? total : NaN;
+  }
+  function isExpr(v){ return /[+\-]/.test(cleanAmt(v).replace(/[+\-]$/,"")); }
+  function showCalc(){
+    var v=$("amt").value, ex=isExpr(v);
+    $("amt").parentNode.classList.toggle("expr", ex);
+    $("calcLine").hidden=!ex;
+    if(ex){ var c=evalAmt(v); $("calcLine").innerHTML = c>0 ? '合计 <b>'+money(c)+'</b>' : '合计不能小于等于 0，请检查'; }
+  }
   $("amt").addEventListener("input",function(){
-    var v=this.value.replace(/[^\d.]/g,""); var p=v.split(".");
-    if(p.length>2) v=p[0]+"."+p.slice(1).join("");
-    p=v.split("."); if(p[1]&&p[1].length>2) v=p[0]+"."+p[1].slice(0,2);
+    var v=cleanAmt(this.value);
     if(v!==this.value) this.value=v;
+    showCalc();
+  });
+  [].forEach.call(document.querySelectorAll(".amount .op"),function(b){
+    b.addEventListener("pointerdown",function(e){ e.preventDefault(); });
+    b.addEventListener("click",function(){
+      var inp=$("amt"), v=cleanAmt(inp.value);
+      if(!v){ toast("先输入第一笔金额"); inp.focus(); return; }
+      v=v.replace(/[+\-]$/,"")+b.getAttribute("data-op");
+      inp.value=v; showCalc(); inp.focus();
+      try{ inp.setSelectionRange(v.length,v.length); }catch(e){}
+    });
   });
 
   // 照片
@@ -462,7 +502,7 @@
 
   function resetForm(){
     editingId=null; photo=null; showPhoto();
-    $("amt").value=""; $("note").value=""; $("date").value=todayStr();
+    $("amt").value=""; $("note").value=""; $("date").value=todayStr(); showCalc();
     $("editBar").hidden=true; $("save").textContent="保存";
     if(SUBS[curCat] && curType==="out"){ curSub=autoSub(); }
     renderCats();
@@ -474,7 +514,8 @@
     if(allCats(it.type).indexOf(it.cat)<0) curCat=CATS[it.type][0];
     if(it.pending){ curCat=CATS[it.type][0]; curSub=(it.type==="out"&&SUBS[curCat])?autoSub():""; }
     renderCats();
-    $("amt").value = it.pending||!it.amt ? "" : (it.amt/100).toFixed(2).replace(/\.00$/,"");
+    $("amt").value = it.pending||!it.amt ? "" : (it.expr || (it.amt/100).toFixed(2).replace(/\.00$/,""));
+    showCalc();
     $("date").value=it.date; $("note").value=it.note||"";
     $("editLabel").textContent = it.pending ? "补记这笔账：填上金额和分类" : "正在修改这笔账";
     $("editBar").hidden=false; $("save").textContent = it.pending ? "补记完成" : "保存修改";
@@ -486,7 +527,7 @@
   $("editCancel").onclick=function(){ resetForm(); };
 
   $("save").addEventListener("click",async function(){
-    var cents=Math.round(parseFloat($("amt").value)*100);
+    var raw=cleanAmt($("amt").value).replace(/[+\-]$/,""), cents=evalAmt(raw), expr=isExpr(raw)?raw:"";
     var pending=false;
     if(!cents||cents<=0){
       if(photo){ pending=true; cents=0; }
@@ -503,6 +544,7 @@
     rec.type=curType; rec.amt=cents; rec.cat=curCat; rec.date=$("date").value||todayStr(); rec.note=$("note").value.trim();
     if(curSub && SUBS[curCat] && curType==="out") rec.sub=curSub; else delete rec.sub;
     if(pending) rec.pending=true; else delete rec.pending;
+    if(expr && !pending) rec.expr=expr; else delete rec.expr;
     if(photo) rec.photo=photo.id; else delete rec.photo;
     if(!old) db.items.push(rec);
     if(!persist()){ if(!old) db.items.pop(); return; }
@@ -521,7 +563,7 @@
         '<div class="num '+(i.type==="out"?"out-c":"in-c")+'">'+(i.type==="out"?"-":"+")+money(i.amt)+'</div>';
       html+='<div class="item" data-edit="'+i.id+'">'+(i.photo?'<div class="ith" data-photo="'+i.photo+'"></div>':'')+
         '<div class="grow"><div class="cat">'+label+'</div>'+
-        (i.note?'<div class="meta">'+esc(i.note)+'</div>':(i.pending?'<div class="meta">'+i.date.slice(5).replace("-","月")+'日 · 点我补上金额</div>':''))+'</div>'+
+        ((i.note||i.expr)?'<div class="meta">'+[i.note?esc(i.note):"", i.expr?"🧮 "+esc(i.expr.replace(/([+\-])/g," $1 ")):""].filter(Boolean).join(" · ")+'</div>':(i.pending?'<div class="meta">'+i.date.slice(5).replace("-","月")+'日 · 点我补上金额</div>':''))+'</div>'+
         amount+'<button class="del" data-id="'+i.id+'" aria-label="删除">×</button></div>';
     });
     return html;

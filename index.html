@@ -39,6 +39,7 @@
   .hero .m b{font-variant-numeric:tabular-nums}
   .card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:14px;box-shadow:0 1px 2px rgba(80,40,50,.04)}
   .card.pend{border:1.5px dashed var(--accent)}
+  .card.bk{border:1.5px dashed var(--accent);font-size:15px;line-height:1.6}
   .editbar{display:flex;align-items:center;justify-content:space-between;background:var(--soft);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:14px;font-weight:600}
   .editbar button{border:0;background:none;color:var(--accent);font-size:14px;font-weight:600}
   .seg{display:flex;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:14px}
@@ -132,6 +133,10 @@
       <div class="t" id="heroTitle"></div>
       <div class="s" id="heroSub"></div>
       <div class="m">本月已花 <b id="heroOut"></b></div>
+    </div>
+    <div class="card bk" id="bkCard" hidden>
+      <div id="bkText"></div>
+      <div class="row" style="margin:10px 0 0"><button class="ghost" id="bkGo" style="flex:1">去备份</button><button class="ghost" id="bkLater" style="flex:1">过几天再说</button></div>
     </div>
     <div class="card pend" id="pendCard" hidden>
       <h2>📌 待补记</h2>
@@ -534,7 +539,20 @@
     $("recent").innerHTML=listHTML(it.filter(function(i){return !i.pending;}),true);
     $("heroOut").textContent=money(sum(it,"out"));
     if(PDB){ fillThumbs($("pendList")); fillThumbs($("recent")); }
+    checkBackup();
   }
+  // 超过 30 天没备份，打开时提醒
+  function checkBackup(){
+    var DAY=86400000, now=Date.now();
+    if(!db.items.length){ $("bkCard").hidden=true; return; }
+    var since = db.lastBackup || db.items.reduce(function(m,i){ return Math.min(m,i.ts||now); }, now);
+    var days=Math.floor((now-since)/DAY);
+    var show = days>=30 && !(db.bkSnooze && now<db.bkSnooze);
+    $("bkCard").hidden=!show;
+    if(show) $("bkText").textContent = db.lastBackup ? "📦 已经 "+days+" 天没有备份了，花 10 秒备份一下吧。" : "📦 记账满一个月啦，记得备份一次，换手机或误删时能恢复。";
+  }
+  $("bkGo").onclick=function(){ goView("set"); };
+  $("bkLater").onclick=function(){ db.bkSnooze=Date.now()+3*86400000; persist(); checkBackup(); };
   // 点一笔：查看照片 / 修改；删除：点一次变"确认删除"，再点才删
   document.addEventListener("click",function(e){
     var b=e.target.closest(".del");
@@ -645,6 +663,7 @@
       }
     }
     shareOrDownload("记账备份-"+todayStr()+".json", JSON.stringify(out), "application/json");
+    db.lastBackup=Date.now(); delete db.bkSnooze; persist(); renderSet();
   };
   $("exportCsv").onclick=function(){
     var lines=["日期,类型,分类,金额,备注"];
@@ -694,7 +713,7 @@
     }); });
     $("customList").innerHTML = tags.length ? tags.join("") : '<div class="sub">还没有</div>';
     $("curChips").innerHTML=CURS.map(function(c){return '<button data-c="'+c+'" class="'+(c===db.cur?"on":"")+'">'+c+'</button>';}).join("");
-    $("countInfo").textContent="共 "+db.items.length+" 条记录。";
+    $("countInfo").textContent="共 "+db.items.length+" 条记录。"+(db.lastBackup?"上次备份："+new Date(db.lastBackup).toLocaleDateString("zh-CN")+"。":"还没有备份过。");
   }
   $("curChips").addEventListener("click",function(e){
     var b=e.target.closest("button"); if(!b) return; db.cur=b.dataset.c; persist(); refresh();
